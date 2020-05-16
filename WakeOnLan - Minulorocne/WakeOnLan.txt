@@ -1,0 +1,53 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h> //socket
+#include <sys/types.h>	//socket
+#include <netinet/in.h> //sockaddr
+#include <arpa/inet.h> //inet_addr
+
+#define EXIT_ERROR (1)
+#define PORT (1234)
+
+int main(void) {
+	int sock;
+	int BC = 1;
+	struct sockaddr_in ServerAdd;
+	unsigned char data[102];
+
+	for(int i = 0; i < 6; i++){
+	        data[i] = 0xFF;
+	}
+
+	int pocitadlo = 6;
+	for(int i = 0; i < 16; i++){
+		data[pocitadlo] = 0x01;
+		pocitadlo++;
+		data[pocitadlo] = 0x02;
+		pocitadlo++;
+		data[pocitadlo] = 0x03;
+		pocitadlo++;
+		data[pocitadlo] = 0x04;
+	    pocitadlo++;
+		data[pocitadlo] = 0x05;
+	    pocitadlo++;
+	    data[pocitadlo] = 0x06;
+	    pocitadlo++;
+	}
+
+	if((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+			perror("socket():");
+			return EXIT_ERROR;
+	}
+
+	if(setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &BC, sizeof(BC)) == -1 ){
+	        perror("setsockopt():");
+	        return EXIT_ERROR;
+	}
+
+	ServerAdd.sin_addr.s_addr = inet_addr("10.0.2.255");
+	ServerAdd.sin_family = AF_INET;
+	ServerAdd.sin_port = htons(PORT);
+
+	sendto(sock, &data, sizeof(unsigned char)* 102, 0, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd));
+	return (EXIT_SUCCESS);
+}

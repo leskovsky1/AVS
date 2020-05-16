@@ -1,0 +1,640 @@
+/usr/local/eclipse/eclipse
+############################################################################################################################
+MULTICAST_CAS
+############################################################################################################################
+----------------------------------------------------------------------------------------------------------------------------
+Server
+----------------------------------------------------------------------------------------------------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netinet/udp.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <time.h>
+
+#define EXIT_ERROR (1)
+#define MCASTIP "239.1.1.1"
+#define PORT (9999)
+
+int main(void) {
+	int sock;
+	struct sockaddr_in ServerAdd;
+	time_t cas;
+
+	if((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+		perror("socket");
+		return EXIT_ERROR;
+	}
+
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0)
+	            perror("setsockopt(SO_REUSEADDR) failed");
+
+	memset(&ServerAdd, 0, sizeof(ServerAdd));
+	ServerAdd.sin_family = AF_INET;
+	ServerAdd.sin_port = htons(PORT);
+	inet_aton(MCASTIP, &(ServerAdd.sin_addr));
+
+	if((bind(sock, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd)) == -1)){
+		perror("bind");
+		close(sock);
+		return EXIT_ERROR;
+	}
+
+	for(;;){
+		cas = time(NULL);
+		sendto(sock, &cas, sizeof(cas), 0, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd));
+		sleep(1);
+	}
+
+	return EXIT_SUCCESS;
+}
+--------------------------------------------------------------------------------------------------------------------------------
+Klient
+--------------------------------------------------------------------------------------------------------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <netinet/udp.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <time.h>
+
+#define EXIT_ERROR (1)
+#define MCASTIP "239.1.1.1"
+#define PORT (9999)
+#define INTERFACE ("eth0")
+
+int main(void) {
+	int sock;
+	struct sockaddr_in KlientAddr;
+	struct ip_mreqn Mcast;
+	time_t presnyCas;
+
+	if((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+		perror("socket");
+		return EXIT_ERROR;
+	}
+
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0)
+		            perror("setsockopt(SO_REUSEADDR) failed");
+
+	KlientAddr.sin_family = AF_INET;
+	KlientAddr.sin_addr.s_addr = INADDR_ANY;
+	KlientAddr.sin_port = htons(PORT);
+
+	if((bind(sock, (struct sockaddr *)&KlientAddr, sizeof(KlientAddr))) == -1){
+		perror("bind");
+		close(sock);
+		return EXIT_ERROR;
+	}
+
+	inet_aton(MCASTIP, &Mcast.imr_multiaddr);
+	Mcast.imr_ifindex = if_nametoindex(INTERFACE);
+	Mcast.imr_address.s_addr = INADDR_ANY;
+
+	if ((setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &Mcast, sizeof (Mcast))) == -1){
+		perror("setsockopt");
+		close(sock);
+		exit(EXIT_ERROR);
+	}
+
+	socklen_t Velkost = sizeof (KlientAddr);
+
+	if(recvfrom(sock, &presnyCas, sizeof (presnyCas), 0, (struct sockaddr *) &KlientAddr, &Velkost) == -1){
+		perror("recvfrom");
+		exit(EXIT_ERROR);
+	}
+
+	printf("Presny cas je : %s\n", ctime(&presnyCas));
+	close(sock);
+	return EXIT_SUCCESS;
+}
+############################################################################################################################################
+GENERATOR_TCP
+############################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <string.h>
+
+#define EXIT_ERROR (1)
+#define PORT (1234)
+#define BACKLOG (2)
+
+void * clientThread (void * arg){
+	int sock = *((int *) arg);
+	char znak;
+	for (;;){
+		int r = (rand() % 95)+32;
+		znak = (char)r;
+		if ((send(sock, &znak, sizeof(znak), 0)) < 1){
+		    perror("send");
+		    close(sock);
+		    free(arg);
+		    pthread_exit(NULL);
+		    exit(EXIT_ERROR);
+		}
+	}
+	return NULL;
+}
+
+int main(void) {
+
+	int sock;
+	struct sockaddr_in ServerAdd, ClientAdd;
+
+	if ((sock = socket(AF_INET, SOCK_STREAM,0)) == -1){
+		perror("socket");
+		return EXIT_ERROR;
+	}
+
+	memset(&ServerAdd,0,sizeof(ServerAdd));
+	ServerAdd.sin_addr.s_addr = INADDR_ANY;
+	ServerAdd.sin_family = AF_INET;
+	ServerAdd.sin_port = htons(PORT);
+
+	if ((bind(sock, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd))) == -1){
+		perror("bind");
+		close(sock);
+		exit(EXIT_ERROR);
+	}
+
+	if (listen(sock, BACKLOG) == -1){
+	    perror("listen");
+	    close(sock);
+	    exit(EXIT_ERROR);
+	}
+
+	for(;;){
+		int * clientSock = calloc(0, sizeof(int));
+		int velkost = sizeof(ClientAdd);
+		*clientSock = accept(sock, (struct sockaddr *) &ClientAdd,(socklen_t *)&velkost);
+		if (*clientSock == -1){
+		   perror("accept");
+		   continue;
+		}
+
+		pthread_t vlakno;
+		if ((pthread_create(&vlakno, NULL, clientThread, clientSock)) != 0){
+		       perror("pthread_create");
+		       continue;
+		}
+	 }
+	return EXIT_SUCCESS;
+}
+#######################################################################################################################################################
+WakeOnLAN
+#######################################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h> //socket
+#include <sys/types.h>	//socket
+#include <netinet/in.h> //sockaddr
+#include <arpa/inet.h> //inet_addr
+
+#define EXIT_ERROR (1)
+#define PORT (1234)
+
+int main(void) {
+	int sock;
+	int BC = 1;
+	struct sockaddr_in ServerAdd;
+	unsigned char data[102];
+
+	for(int i = 0; i < 6; i++){
+	        data[i] = 0xFF;
+	}
+
+	int pocitadlo = 6;
+	for(int i = 0; i < 16; i++){
+		data[pocitadlo] = 0x01;
+		pocitadlo++;
+		data[pocitadlo] = 0x02;
+		pocitadlo++;
+		data[pocitadlo] = 0x03;
+		pocitadlo++;
+		data[pocitadlo] = 0x04;
+	    pocitadlo++;
+		data[pocitadlo] = 0x05;
+	    pocitadlo++;
+	    data[pocitadlo] = 0x06;
+	    pocitadlo++;
+	}
+
+	if((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+			perror("socket():");
+			return EXIT_ERROR;
+	}
+
+	if(setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &BC, sizeof(BC)) == -1 ){
+	        perror("setsockopt():");
+	        return EXIT_ERROR;
+	}
+
+	ServerAdd.sin_addr.s_addr = inet_addr("10.0.2.255");
+	ServerAdd.sin_family = AF_INET;
+	ServerAdd.sin_port = htons(PORT);
+
+	sendto(sock, &data, sizeof(unsigned char)* 102, 0, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd));
+	return (EXIT_SUCCESS);
+}
+#######################################################################################################################################################
+DNS
+#######################################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h> //isdigit
+#include <netinet/in.h> //sockaddr
+#include <sys/socket.h>
+#include <netdb.h>
+#include <sys/types.h>
+#include <string.h>
+#include <arpa/inet.h> //inet_addr
+
+#define EXIT_ERROR (1)
+#define DLZKA (100)
+
+int main(int argc, char** argv) {
+
+	struct addrinfo hints, *result;
+	struct sockaddr_in ZadanaAdresa;
+	char hostP[DLZKA];
+
+	if(argc != 2) {
+	     perror ("Pouzi v tvare: <program> <host>");
+         return EXIT_ERROR;
+	}
+
+	char *parameter = argv[1];
+	if((isdigit(*parameter) && isdigit(*(parameter+1)) && isdigit(*(parameter+2))) && ('.' == *(parameter+3))){
+		ZadanaAdresa.sin_family = AF_INET;
+		ZadanaAdresa.sin_addr.s_addr = inet_addr(parameter);
+		socklen_t dlzka;
+		dlzka = sizeof(ZadanaAdresa);
+
+		int v = getnameinfo((struct sockaddr *)&ZadanaAdresa, dlzka, hostP, sizeof(hostP), NULL,0, NI_NAMEREQD);
+			if(v != 0){
+				perror("getnameinfo");
+				return EXIT_ERROR;
+			}
+
+	printf("%s prelozene na %s\n", parameter, hostP);
+
+	} else {
+		memset(&hints, 0, sizeof(struct addrinfo));
+
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_DGRAM;
+		hints.ai_flags = 0;
+		hints.ai_protocol = 0;
+
+		int s = getaddrinfo(parameter, NULL, &hints, &result);
+		if(s != 0) {
+		      perror("getaddrinfo");
+		      return EXIT_ERROR;
+		}
+
+		while (result != NULL){
+			char TextAddress [INET6_ADDRSTRLEN];
+			memset (TextAddress, '\0', INET6_ADDRSTRLEN);
+			switch (result->ai_family) {
+				case AF_INET:
+						inet_ntop (result->ai_family, &((struct sockaddr_in *)result->ai_addr)->sin_addr, TextAddress, INET6_ADDRSTRLEN);
+						break;
+				case AF_INET6:
+						inet_ntop (result->ai_family, &((struct sockaddr_in6 *)result->ai_addr)->sin6_addr, TextAddress, INET6_ADDRSTRLEN);
+						break;
+			}
+			printf ("%s prelozene na %s\n", parameter, TextAddress);
+			        result=result->ai_next;
+		}
+		freeaddrinfo(result);
+	}
+
+	return EXIT_SUCCESS;
+}
+#######################################################################################################################################################
+GeneratorUDP
+#######################################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netinet/udp.h>
+#include <unistd.h> //close
+#include <arpa/inet.h> //inet_addr
+
+#define EXIT_ERROR (1)
+
+int main(int argc, char** argv) {
+	int sock;
+	struct sockaddr_in ServerAdd, AttackAdd;
+
+	if(argc != 3) {
+		     perror ("Pouzi v tvare: <program> <cielova IP> <port>");
+	         return EXIT_ERROR;
+	}
+
+	if((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+			perror("socket");
+			return EXIT_ERROR;
+	}
+
+	memset(&ServerAdd, 0, sizeof(ServerAdd));
+	ServerAdd.sin_family = AF_INET;
+	ServerAdd.sin_port = htons(1234);
+	ServerAdd.sin_addr.s_addr = INADDR_ANY;
+
+	if((bind(sock, (struct sockaddr *)&ServerAdd, sizeof(ServerAdd)) == -1)){
+		perror("bind");
+		close(sock);
+		return EXIT_ERROR;
+	}
+
+	printf("Zadaj velkost paketov: ");
+	int velkost;
+	scanf("%i", &velkost);
+	unsigned char paket[velkost];
+
+	printf("Zadaj interval medzi paketmi: ");
+	int interval;
+	scanf("%i", &interval);
+
+	memset(&AttackAdd, 0, sizeof(AttackAdd));
+	AttackAdd.sin_family = AF_INET;
+	AttackAdd.sin_port = htons(atoi((argv[2])));
+	AttackAdd.sin_addr.s_addr = inet_addr(argv[1]);
+
+	int pocitadloVygenerovanych = 0;
+	int pocitadloPoslanych = 0;
+
+	for(int i = 0; i < 100; i++){
+		if((sendto(sock, paket, velkost, 0, (struct sockaddr *)&AttackAdd, sizeof(AttackAdd))) == -1){
+			pocitadloVygenerovanych += velkost;
+			continue;
+		}
+		pocitadloVygenerovanych += velkost;
+		pocitadloPoslanych += velkost;
+		sleep(interval);
+	}
+
+	printf("Pocet vygenerovanych dat: %i", pocitadloVygenerovanych);
+	printf("\nPocet poslanych dat: %i", pocitadloPoslanych);
+
+	return EXIT_SUCCESS;
+}
+#######################################################################################################################################################
+ScannerTCP
+#######################################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <error.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <sys/time.h>
+#include <pthread.h>
+#include <arpa/inet.h>
+#include <string.h>
+
+#define EXIT_ERROR (1)
+
+int sock;
+
+void *scanPort(void *arg){
+	struct sockaddr_in DestinationAdd = *((struct sockaddr_in *)arg);
+	if((connect(sock,(struct sockaddr *)&DestinationAdd,sizeof(DestinationAdd))) < 0){
+		printf("\nPort %d je zablokovany", ntohs(DestinationAdd.sin_port));
+		return NULL;
+	}
+	printf("\nPort %d je povoleny", ntohs(DestinationAdd.sin_port));
+	return NULL;
+}
+
+int main(int argc, char** argv) {
+
+	if(argc != 2) {
+		perror ("Pouzi v tvare: <program> <cielovaIP>");
+	    return EXIT_ERROR;
+	}
+
+	if ((sock = socket(AF_INET, SOCK_STREAM,0)) == -1){
+		perror("socket");
+		return EXIT_ERROR;
+    }
+
+	struct timeval timeout;
+	timeout.tv_sec = 10;
+	timeout.tv_usec = 0;
+	setsockopt (sock,SOL_SOCKET,SO_SNDTIMEO,(char *)&timeout,sizeof(timeout));
+
+
+	int zaciatocnyPort = 0;
+	int konecnyPort = 0;
+
+
+	printf("Zadaj zaciatocny port: ");
+	scanf("%i", &zaciatocnyPort);
+
+	printf("Zadaj konecny port: ");
+    scanf("%i", &konecnyPort);
+
+    for(; zaciatocnyPort <= konecnyPort; zaciatocnyPort++){
+    	pthread_t thread;
+    	struct sockaddr_in *DestinationAdd = (struct sockaddr_in*)malloc(sizeof(struct sockaddr_in));
+
+    	DestinationAdd->sin_family = AF_INET;
+        DestinationAdd->sin_addr.s_addr = inet_addr(argv[1]);
+    	DestinationAdd->sin_port = htons(zaciatocnyPort);
+    	pthread_create(&thread,NULL,scanPort,(void *)DestinationAdd);
+    }
+
+    pthread_exit(NULL);
+	return EXIT_SUCCESS;
+}
+#######################################################################################################################################################
+PrijimacCDP
+#######################################################################################################################################################
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <linux/if_packet.h> //sockaddr_ll, mreqn
+#include <net/ethernet.h>
+#include <arpa/inet.h> //htons
+#include <unistd.h> //close
+#include <string.h> //memset
+#include <net/if.h> //if_nametoindex
+
+#define EXIT_ERROR (1)
+#define	SNAP_PAYLOAD_SIZE (1492)
+
+/* Format ramca 802 SNAP = 802.3 + 802.2 LLC + SNAP */
+struct SNAPFrame
+{
+  unsigned char DstMAC[6];
+  unsigned char SrcMAC[6];
+  unsigned short Length;
+  unsigned char DSAP;
+  unsigned char SSAP;
+  unsigned char Control;
+  unsigned char OUI[3];
+  unsigned short PID;
+  char Payload[0];
+} __attribute__ ((packed));
+
+/* Format elementarneho TLV */
+struct TLV
+{
+  unsigned short Type;
+  unsigned short Length;
+  char Value[0];
+} __attribute__ ((packed));
+
+/* Format CDP spravy */
+struct CDPMessage
+{
+  unsigned char Version;
+  unsigned char TTL;
+  unsigned short CSum;
+  struct TLV TLV[0];
+} __attribute__ ((packed));
+
+int main(int argc, char *argv[]) {
+
+	int sock;
+	struct sockaddr_ll Addr;
+	struct packet_mreq Mreq;
+	struct SNAPFrame *F;
+	struct CDPMessage *C;
+	struct TLV *T;
+
+	if (argc != 2){
+	      printf("Usage: %s <interface name>\n", argv[0]);
+	      return EXIT_ERROR;
+	}
+
+	if((sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_802_2))) == -1){
+		perror("socket");
+		return EXIT_ERROR;
+	}
+
+	memset(&Addr, 0, sizeof (Addr));
+	Addr.sll_family = AF_PACKET;
+	Addr.sll_protocol = htons (ETH_P_802_2);
+	if((Addr.sll_ifindex = if_nametoindex(argv[1])) == 0){
+		perror ("if_nametoindex");
+		close (sock);
+		return EXIT_ERROR;
+	}
+
+	if(bind(sock, (struct sockaddr *)&Addr, sizeof(Addr)) == -1){
+	      perror("bind");
+	      close(sock);
+	      return EXIT_ERROR;
+	}
+
+	memset (&Mreq, 0, sizeof (Mreq));
+	Mreq.mr_ifindex = Addr.sll_ifindex;
+	Mreq.mr_type = PACKET_MR_MULTICAST;
+	Mreq.mr_alen = 6;
+	Mreq.mr_address[0] = 0x01;
+	Mreq.mr_address[1] = 0x00;
+	Mreq.mr_address[2] = 0x0c;
+    Mreq.mr_address[3] = 0xcc;
+	Mreq.mr_address[4] = 0xcc;
+	Mreq.mr_address[5] = 0xcc;
+
+	if (setsockopt(sock, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &Mreq, sizeof(Mreq)) == -1){
+	      perror("setsockopt");
+	      close(sock);
+	      return EXIT_ERROR;
+	}
+
+	if((F = malloc (sizeof (struct SNAPFrame) + SNAP_PAYLOAD_SIZE)) == NULL){
+		perror("malloc");
+		close(sock);
+		return EXIT_ERROR;
+	}
+
+	for(;;){
+		int Length;
+		memset (F, 0, sizeof(struct SNAPFrame) + SNAP_PAYLOAD_SIZE);
+		read(sock, F, sizeof(struct SNAPFrame) + SNAP_PAYLOAD_SIZE);
+
+		if (F->DSAP != 0xaa)
+			continue;
+
+		if (F->SSAP != 0xaa)
+			continue;
+
+		if (F->Control != 0x03)
+			continue;
+
+		if (((F->OUI[0] << 16) + (F->OUI[1] << 8) + (F->OUI[2])) != 0x00000c)
+			continue;
+
+		C = (struct CDPMessage *) F->Payload;
+
+		if (C->Version != 2)
+			continue;
+
+		T = C->TLV;
+
+		Length = 8 + sizeof (struct CDPMessage);
+
+		printf ("%02hhx%02hhx.%02hhx%02hhx.%02hhx%02hhx: ",
+			      F->SrcMAC[0],
+			      F->SrcMAC[1],
+			      F->SrcMAC[2],
+				  F->SrcMAC[3],
+				  F->SrcMAC[4],
+				  F->SrcMAC[5]);
+		while (Length < ntohs (F->Length)){
+
+		unsigned short int TLVLen = ntohs (T->Length);
+			if (TLVLen < sizeof (struct TLV)){
+			      printf ("corrupt TLV.\n");
+			      break;
+			}
+
+		unsigned short int VLen = TLVLen - sizeof (struct TLV);
+		char StringValue[VLen + 1];
+		memset (StringValue, '\0', VLen + 1);
+
+		switch (ntohs (T->Type))
+			{
+			 case 0x0001:
+			      strncpy (StringValue, T->Value, VLen);
+			      printf ("name: %s, ", StringValue);
+			      break;
+
+			 case 0x0003:
+			      strncpy (StringValue, T->Value, VLen);
+			      printf ("port: %s, ", StringValue);
+			      break;
+			}
+			Length += TLVLen;
+			T = (struct TLV *) (T->Value + VLen);
+		}
+	  printf ("\n");
+	}
+
+free(F);
+close(sock);
+return EXIT_SUCCESS;
+}
